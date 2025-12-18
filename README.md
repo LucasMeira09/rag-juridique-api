@@ -129,3 +129,9 @@ L'API sera accessible sur `http://127.0.0.1:8000`.
 
 - [Exemples de recherche](docs/EXEMPLES.md)
 - [Guide de demarrage](docs/QUICKSTART.md)
+
+## OUR TEAM!!!
+
+- https://github.com/LucasMeira09
+- https://github.com/16050
+- 
