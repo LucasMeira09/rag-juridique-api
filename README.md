@@ -130,6 +130,9 @@ L'API sera accessible sur `http://127.0.0.1:8000`.
 - [Exemples de recherche](docs/EXEMPLES.md)
 - [Guide de demarrage](docs/QUICKSTART.md)
 
+## Special mention 
+-Tekno-Family -->https://teknofamily.be/
+
 ## OUR TEAM!!!
 
 - https://github.com/LucasMeira09
