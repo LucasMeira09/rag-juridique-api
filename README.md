@@ -1,53 +1,36 @@
-# Systeme de Recherche Semantique pour Textes Juridiques
-
-Ce projet implemente un pipeline de recherche semantique (RAG) utilisant ChromaDB et SentenceTransformers pour indexer et interroger des documents juridiques.
-
-> **Nouveau ?** Consultez le [Guide de demarrage rapide](docs/QUICKSTART.md)
-
-## Fonctionnalites
-
-- **Conversion PDF -> TXT** : Extrait automatiquement le texte de vos PDFs
-- **Indexation intelligente** : Decoupe et indexe vos documents avec des embeddings
-- **Recherche semantique** : Trouve les passages pertinents meme sans mots-cles exacts
-- **Affichage elegant** : Resultats formates avec scores de pertinence
-- **API REST** : Interface API avec FastAPI pour integration frontend
-- **Evite les doublons** : N'indexe pas deux fois le meme contenu
-
-## Prerequis
-
-- Python 3.8 ou superieur
+# Semantic Search System for Legal Texts
+This project implements a semantic search pipeline (RAG) using ChromaDB and SentenceTransformers to index and query legal documents.
+> **New here?** Check out the [Quick Start Guide](docs/QUICKSTART.md)
+## Features
+- **PDF -> TXT Conversion**: Automatically extracts text from your PDFs
+- **Smart Indexing**: Splits and indexes your documents with embeddings
+- **Semantic Search**: Finds relevant passages even without exact keywords
+- **Elegant Display**: Formatted results with relevance scores
+- **REST API**: API interface with FastAPI for frontend integration
+- **Avoids Duplicates**: Doesn't index the same content twice
+## Prerequisites
+- Python 3.8 or higher
 - pip
-
-## Installation rapide
-
-### Avec Make (recommande)
-
+## Quick Installation
+### With Make (recommended)
 ```bash
-# Installer toutes les dependances
+# Install all dependencies
 make install
-
-# Activer l'environnement virtuel
+# Activate the virtual environment
 source venv/bin/activate
-
-# Executer le script
+# Run the script
 make run
 ```
-
-### Installation manuelle
-
+### Manual installation
 ```bash
-# Creer un environnement virtuel
+# Create a virtual environment
 python3 -m venv venv
-
-# Activer l'environnement
+# Activate the environment
 source venv/bin/activate
-
-# Installer les dependances
+# Install dependencies
 pip install -r requirements.txt
 ```
-
-## Structure du projet
-
+## Project Structure
 ```
 formation-ai-/
 ├── src/                  # Code source de l'application
@@ -69,72 +52,52 @@ formation-ai-/
 └── README.md             # Ce fichier
 ```
 
-## Utilisation
-
-### Etape 1 : Convertir les PDFs en TXT (optionnel)
-
-1. Placez vos fichiers PDF dans le dossier `data/raw_pdfs/`
-2. Lancez la conversion :
-
+## Usage
+### Step 1: Convert PDFs to TXT (optional)
+1. Place your PDF files in the `data/raw_pdfs/` folder
+2. Run the conversion:
 ```bash
 make convert-pdf
-# ou
+# or
 python -m src.pdf_to_txt
 ```
-
-### Etape 2 : Recherche semantique (CLI)
-
-Le script `src/traitement.py` permet d'interroger la base de donnees.
-
-**Mode interactif :**
+### Step 2: Semantic Search (CLI)
+The `src/traitement.py` script allows you to query the database.
+**Interactive mode:**
 ```bash
 make run
-# ou
+# or
 python -m src.traitement
 ```
-
-**Requete unique :**
+**Single query:**
 ```bash
-make query QUERY="quelle autorite est responsable ?"
-# ou
-python -m src.traitement "quelle autorite est responsable ?"
+make query QUERY="which authority is responsible?"
+# or
+python -m src.traitement "which authority is responsible?"
 ```
-
-### Etape 3 : Lancer l'API (Backend)
-
-Pour utiliser l'application via une interface web ou un autre client :
-
+### Step 3: Launch the API (Backend)
+To use the application via a web interface or another client:
 ```bash
 uvicorn src.bridge:app --reload
 ```
-L'API sera accessible sur `http://127.0.0.1:8000`.
-
-## Commandes Make disponibles
-
-- `make install` - Installation complete
-- `make convert-pdf` - Convertit les PDFs en TXT
-- `make run` - Mode interactif CLI
-- `make query QUERY="..."` - Recherche CLI
-- `make clean` - Nettoyage
-- `make reset-db` - Reinitialisation de la base de donnees
-
-## Dependances principales
-
-- **chromadb** : Base de donnees vectorielle
-- **sentence-transformers** : Generation d'embeddings
-- **fastapi** : Framework API
-- **pypdf** : Extraction PDF
-
+The API will be accessible at `http://127.0.0.1:8000`.
+## Available Make Commands
+- `make install` - Complete installation
+- `make convert-pdf` - Converts PDFs to TXT
+- `make run` - Interactive CLI mode
+- `make query QUERY="..."` - CLI search
+- `make clean` - Cleanup
+- `make reset-db` - Database reset
+## Main Dependencies
+- **chromadb**: Vector database
+- **sentence-transformers**: Embedding generation
+- **fastapi**: API framework
+- **pypdf**: PDF extraction
 ## Documentation
-
-- [Exemples de recherche](docs/EXEMPLES.md)
-- [Guide de demarrage](docs/QUICKSTART.md)
-
+- [Search examples](docs/EXEMPLES.md)
+- [Getting started guide](docs/QUICKSTART.md)
 ## Special mention 
 -Tekno-Family -->https://teknofamily.be/
-
 ## OUR TEAM!!!
-
 - https://github.com/LucasMeira09
 - https://github.com/16050
-- 
