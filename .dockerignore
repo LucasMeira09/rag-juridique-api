@@ -9,5 +9,5 @@ venv/
 .git/
 .gitignore
 data/
-chroma_db/
+!data/chroma_db/
 .vscode/
