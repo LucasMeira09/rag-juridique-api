@@ -9,9 +9,6 @@ __pycache__/
 *$py.class
 *.so
 
-# Base de données ChromaDB
-chroma_db/
-
 # Données
 raw_pdfs/
 clean_data/*.txt
@@ -30,3 +27,6 @@ Thumbs.db
 # Logs
 *.log
 
+# Variables d'environnement
+.env
+.env.local

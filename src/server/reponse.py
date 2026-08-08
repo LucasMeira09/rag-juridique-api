@@ -1,83 +1,74 @@
-import requests
-import json
+from dotenv import load_dotenv
 import os
-from query_search import QuerySearch
+from groq import Groq, RateLimitError
+import time
+from .query_search import QuerySearch
+
+load_dotenv()
 
 class Generation:
-    # Handles LLM response generation using Ollama/Mistral
+    # Handles LLM response generation using Groq free api
     
     def __init__(self):
-        base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.url = f"{base_url}/api/generate"
+        groq_key = os.getenv("GROQ_KEY")
+        self.client = Groq(api_key=groq_key)
         self.pipeline = QuerySearch()
 
     def question_subject(self, query):
 
+        category_names = self.pipeline.get_category_names()
+
+        if not category_names:
+            category_names = ["aucune"]
+
+
+        name_list = ", ".join(category_names)
+        
         prompt = f"""
-            Tu es un assistant qui génère UN SEUL sujet très concis pour une question donnée.
+                Voici une liste de catégories juridiques : {name_list}
 
-            Objectif :
-            - Tu dois capturer l'idée principale de la question en quelques mots.
-            - Le sujet doit être court, clair et en français.
-            - Ce doit être un seul sujet central, pas une phrase, pas plusieurs idées.
+                Question de l'utilisateur : {query}
 
-            Exemples de comportement attendu :
-
-            Question : "Donne-moi trois exemples de comment bien trier."
-            --> Sujet attendu : "Méthodes de tri efficaces"
-
-            Question : "Comment organiser mes fichiers sur l'ordinateur ?"
-            --> Sujet attendu : "Organisation des fichiers sur ordinateur"
-
-            Question : "Quelles sont les bonnes pratiques pour apprendre le Python ?"
-            --> Sujet attendu : "Bonnes pratiques pour apprendre Python"
-
-            Règles STRICTES de format :
-            - Réponds par UN SEUL sujet, 3 à 8 mots maximum.
-            - Pas de phrase complète.
-            - Pas de deux-points (:) dans la réponse.
-            - Pas de guillemets.
-            - Pas d'explication.
-            - Pas de texte avant ou après le sujet.
-            - Pas de préfixe du type "Sujet :" ou "Ligne de sujet :".
-
-            Question :
-            {query}
-
-            Réponds uniquement par le sujet, rien d'autre.
+                À quelle catégorie de cette liste cette question correspond-elle le mieux ?
+                Réponds UNIQUEMENT avec le nom exact d'une catégorie de la liste, copié tel quel.
+                Si aucune catégorie ne correspond clairement, réponds uniquement : AUCUNE
             """
 
-        data = {
-            "model": "mistral",
-            "prompt": prompt,
-            "stream": False,
-        }
-
-        try:
-            r = requests.post(self.url, json=data)
-            r.raise_for_status()
-
-            response_json = r.json()
-            subject_line = response_json.get("response", "").strip()
-
-            # Petit filet de sécurité : si jamais le modèle renvoie "Sujet : X"
-            for prefix in ["Sujet :", "Sujet:", "Ligne de sujet :", "Ligne de sujet:"]:
-                if subject_line.lower().startswith(prefix.lower()):
-                    subject_line = subject_line[len(prefix):].strip()
             
-            subject_line = subject_line.replace('"', '').replace("'", "")   
+        try:
 
-            return subject_line or "Sujet indisponible"
+            model_response = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role" : "system",
+                        "content" : prompt
+                    },
+                    {
+                        "role" : "user",
+                        "content" : query
+                    }
+                ],
+                model="llama-3.1-8b-instant"
+            )
 
+            return model_response.choices[0].message.content
+
+        except RateLimitError as e:
+            return "Rate"
+        
         except Exception as e:
-            print(f"Erreur lors de l'appel à Ollama ({self.url}): {e}")
-            return "Sujet indisponible"
+            return str(e)
+              
         
     def prompt_augmentation(self, query):
         # Generate an answer based on retrieved documents
 
         # appele la fonction pour filtrer le sujet de la question
         query_subject = self.question_subject(query)
+        if query_subject == "Rate":
+            time.sleep(60)
+            query_subject = self.question_subject(query)
+
         response, results = self.pipeline.query_search_db(query_subject)
 
         prompt = f"""
@@ -103,27 +94,29 @@ class Generation:
                 - Si la réponse n'est pas clairement présente ou déductible des documents, réponds uniquement :
                 "Aucune information pertinente trouvée dans les documents."
 
-                Question : {query}
-
                 Ta réponse finale :
         """
         
-        data = {
-            "model": "mistral",
-            "prompt": prompt,
-            "stream": False
-        }
-        
         try:
-            r = requests.post(self.url, json=data)
-            r.raise_for_status()
-            
-            response_json = r.json()
-            output = response_json.get("response", "").strip()
-            
-            return output, results
-            
-        except Exception as e:
-            print(f"Erreur lors de l'appel à Ollama ({self.url}): {e}")
+        
+            model_response = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role" : "system",
+                        "content" : prompt
+                    },
+                    {
+                        "role" : "user",
+                        "content" : query
+                    }
+                ],
+                model="llama-3.1-8b-instant"
+            )
 
-            return "Désolé, le service de génération de réponse est indisponible pour le moment.", results
+            return model_response.choices[0].message.content, results
+
+        except RateLimitError as e:
+            return "rate", results
+        
+        except Exception as e:
+            return "error", e

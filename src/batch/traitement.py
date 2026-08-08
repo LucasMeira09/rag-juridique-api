@@ -3,136 +3,37 @@ from sentence_transformers import SentenceTransformer
 import os
 from pathlib import Path
 import json
+import unicodedata
 import re
-import tempfile
-import shutil
+from groq import Groq, RateLimitError
+from dotenv import load_dotenv
+import time
 
-try:
-    from azure.identity import ClientSecretCredential, DefaultAzureCredential
-    from azure.storage.filedatalake import DataLakeServiceClient
-except ModuleNotFoundError:
-    raise SystemExit(
-        "SDK Azure manquant: installez 'azure-identity' et 'azure-storage-file-datalake'.\n"
-        "Exemples:\n"
-        "  - pip:    python -m pip install azure-identity azure-storage-file-datalake\n"
-        "  - conda:  conda install -c conda-forge azure-identity azure-storage-file-datalake"
-    )
+load_dotenv()
 
-# ---------- CONFIGURATION ADLS ----------
-# Variables d'environnement attendues:
-# - AZURE_STORAGE_ACCOUNT: nom du compte (sans suffixe .dfs.core.windows.net)
-# - AZURE_STORAGE_KEY: clé de compte (option 1 d'authentification)
-# - STORAGE_FILESYSTEM: nom du file system (ex: 'data')
-# - Option service principal (si pas de STORAGE_KEY):
-#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
-ACCOUNT_NAME = "juridicai"
-ACCOUNT_KEY = os.getenv("AZURE_STORAGE_KEY", "").strip()
-FILESYSTEM = "data"
+# local config
+# Racine du projet (2 niveaux au-dessus de src/batch/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DATA_DIR = os.getenv("DATA_DIR", str(_PROJECT_ROOT / "data"))
 
-CLEAN_DIR = "clean_data"
-JSON_FILE = "base_dechets.json"
-# ---------------------------------------
+CLEAN_DIR = os.path.join(DATA_DIR, "clean_data")
+CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join(DATA_DIR, "chroma_db"))
 
-def get_dls_client():
-    """Crée et retourne un client Azure Data Lake Storage"""
-    if not ACCOUNT_NAME or not FILESYSTEM:
-        raise SystemExit("Veuillez définir AZURE_STORAGE_ACCOUNT et STORAGE_FILESYSTEM.")
-    account_url = f"https://{ACCOUNT_NAME}.dfs.core.windows.net"
 
-    if ACCOUNT_KEY:
-        return DataLakeServiceClient(account_url=account_url, credential=ACCOUNT_KEY)
-
-    # Essayer DefaultAzureCredential (Managed Identity / dev env), sinon service principal
+def list_files_local(directory_path):
+    #  Liste tous les fichiers dans un répertoire local
     try:
-        credential = DefaultAzureCredential(exclude_interactive_browser_credential=False)
-        return DataLakeServiceClient(account_url=account_url, credential=credential)
-    except Exception:
-        tenant_id = os.getenv("AZURE_TENANT_ID")
-        client_id = os.getenv("AZURE_CLIENT_ID")
-        client_secret = os.getenv("AZURE_CLIENT_SECRET")
-        if not (tenant_id and client_id and client_secret):
-            raise SystemExit(
-                "Aucun mode d'authentification disponible. Fournissez AZURE_STORAGE_KEY "
-                "ou un service principal (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)."
-            )
-        credential = ClientSecretCredential(tenant_id=tenant_id, client_id=client_id, client_secret=client_secret)
-        return DataLakeServiceClient(account_url=account_url, credential=credential)
-
-def list_files_in_adls(file_system_client, directory_path):
-    """Liste tous les fichiers dans un répertoire ADLS"""
-    try:
-        paths_iter = file_system_client.get_paths(path=directory_path)
-        files = []
-        for p in paths_iter:
-            if not p.is_directory and p.name.startswith(directory_path + "/"):
-                files.append(os.path.basename(p.name))
-        return files
+        if not os.path.isdir(directory_path):
+            return []
+        return [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f))]
     except Exception:
         return []
 
-def download_directory(file_system_client, remote_path, local_path):
-    """Télécharge récursivement un dossier depuis ADLS"""
-    os.makedirs(local_path, exist_ok=True)
+def read_text_local(file_path):
+    # Lit un fichier texte local et retourne son contenu
     try:
-        paths = file_system_client.get_paths(path=remote_path)
-        for p in paths:
-            if p.is_directory:
-                continue
-            
-            # Reconstruire le chemin local
-            relative_path = os.path.relpath(p.name, remote_path)
-            local_file_path = os.path.join(local_path, relative_path)
-            
-            # Créer les dossiers parents locaux
-            os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-            
-            # Télécharger
-            file_client = file_system_client.get_file_client(p.name)
-            with open(local_file_path, "wb") as f:
-                if hasattr(file_client, "read_file"):
-                    download = file_client.read_file()
-                else:
-                    download = file_client.download_file()
-                download.readinto(f)
-        print(f"Dossier téléchargé depuis ADLS: {remote_path} -> {local_path}")
-    except Exception as e:
-        print(f"Info: Impossible de télécharger le dossier (il n'existe peut-être pas encore): {e}")
-
-def upload_directory(file_system_client, local_path, remote_path):
-    """Upload récursivement un dossier vers ADLS"""
-    try:
-        for root, dirs, files in os.walk(local_path):
-            for file in files:
-                local_file_path = os.path.join(root, file)
-                # Calculer le chemin relatif pour ADLS
-                relative_path = os.path.relpath(local_file_path, local_path)
-                remote_file_path = f"{remote_path}/{relative_path}".replace("\\", "/")
-                
-                file_client = file_system_client.get_file_client(remote_file_path)
-                
-                with open(local_file_path, "rb") as f:
-                    data = f.read()
-                    try:
-                        file_client.create_file()
-                        file_client.append_data(data, offset=0, length=len(data))
-                        file_client.flush_data(len(data))
-                    except Exception as e:
-                        print(f"Erreur upload {file}: {e}")
-        print(f"Dossier sauvegardé vers ADLS: {local_path} -> {remote_path}")
-        return True
-    except Exception as e:
-        print(f"Erreur critique lors de l'upload du dossier: {e}")
-        return False
-
-def read_text_from_adls(file_system_client, file_path):
-    """Lit un fichier texte depuis ADLS et retourne son contenu"""
-    try:
-        file_client = file_system_client.get_file_client(file_path)
-        if hasattr(file_client, "read_file"):
-            downloader = file_client.read_file()
-        else:
-            downloader = file_client.download_file()
-        return downloader.readall().decode("utf-8")
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
     except Exception as e:
         print(f"Erreur lors de la lecture: {e}")
         return None
@@ -142,73 +43,110 @@ class RetrievalPipeline:
         # Initialise le modèle SentenceTransformer pour les embeddings de texte
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
 
+        groq_key = os.getenv("GROQ_KEY")
+        self.client = Groq(api_key=groq_key)
+
         #base du projet ou ce fichier ce trouve
         self.base_dir = Path(__file__).resolve().parent
         self.project_root = self.base_dir.parent
 
-        # Initialiser le client Azure Data Lake Storage
-        self.dls_client = get_dls_client()
-        self.file_system = self.dls_client.get_file_system_client(FILESYSTEM)
-        
-        # Chemins Azure pour les dossiers
+        # Chemins locaux pour les dossiers
         self.clean_data_dir = CLEAN_DIR
-        self.json_file_path = JSON_FILE
         
-        # --- GESTION CHROMADB SUR ADLS (SYNC) ---
-        # Utilisation d'un dossier temporaire système (invisible dans le projet)
-        self.local_db_path = tempfile.mkdtemp(prefix="chroma_db_")
-        self.remote_db_path = "chromadb" # Dossier dans le conteneur ADLS
+        # Créer les dossiers si nécessaire
+        os.makedirs(CLEAN_DIR, exist_ok=True)
+        os.makedirs(CHROMA_DB_PATH, exist_ok=True)
         
-        print(f"Initialisation: Dossier temporaire créé à {self.local_db_path}")
-        print("Initialisation: Téléchargement de la base Chroma depuis ADLS...")
-        download_directory(self.file_system, self.remote_db_path, self.local_db_path)
+        print(f"Initialisation: Chargement de ChromaDB depuis {CHROMA_DB_PATH}")
         
         # Crée ou connecte une base de données Chroma persistante au chemin local
-        self.chroma_client = chromadb.PersistentClient(path=self.local_db_path)
+        self.chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
         # Récupère ou crée une collection dans la base appelée "law_text"
         self.collection = self.chroma_client.get_or_create_collection(name="law_text")
+        self.categories_collection = self.chroma_client.get_or_create_collection(name="categories")
 
-    def save_to_adls(self):
-        """Sauvegarde la base de données locale vers ADLS"""
-        print("Sauvegarde: Upload de la base Chroma vers ADLS...")
-        upload_directory(self.file_system, self.local_db_path, self.remote_db_path)
+    def save(self):
+        # No-op — PersistentClient sauvegarde automatiquement sur disque.
+        print("Sauvegarde: ChromaDB persiste automatiquement sur disque local.")
 
     def cleanup(self):
-        """Nettoie le dossier temporaire"""
-        try:
-            print(f"Nettoyage: Suppression du dossier temporaire {self.local_db_path}")
-            shutil.rmtree(self.local_db_path)
-        except Exception as e:
-            print(f"Erreur lors du nettoyage: {e}")
+        # No-op — la base locale persiste sur disque.
+        pass
 
     def find_category(self, text):
         # trouve la categorie aproximatif
         
-        # recupere le dic dans base_dechets.json depuis ADLS
-        json_content = read_text_from_adls(self.file_system, self.json_file_path)
-        if json_content is None:
-            raise SystemExit(f"Impossible de lire {self.json_file_path} depuis ADLS.")
-        category = json.loads(json_content)
-        # cree un dic avec les meme cle que l original
-        dominent_category = {key:0 for key in category}
-        # parcour chaque cle de category
-        for key,data in category.items():
-            # recupere les poid de chaque categorie
-            weight = data["weight"]
-            total = 0
-            for word in data["keywords"]:
-                #pour chaque partie de texte conte l'aparition des mot en ajoutent le poid
-                pattern = r"\b" + word + r"\b"
-                total += len(re.findall(pattern, text))
-                dominent_category[key] = total * weight
+        similarity_threshold = 0.45
+
+        doc_embedding = self.model.encode(text[:3000], convert_to_numpy=True)
+
+        existing_count = self.categories_collection.count()
+        if existing_count > 0:
+            result = self.categories_collection.query(
+                query_embeddings=[doc_embedding],
+                n_results= 1
+            )
+
+            if result["distances"][0]:
+                best_distance = result["distances"][0][0]
+                best_category = result["metadatas"][0][0]["name"]
+                if best_distance <= similarity_threshold:
+                    return best_category
+
+        category_name = self.ask_llm_for_new_category_name(text)
+
+        if category_name == "Rate":
+            time.sleep(60)
+
+
+        category_name = category_name.strip().lower()
+        category_name = unicodedata.normalize('NFKD', category_name).encode('ascii', 'ignore').decode('ascii')
         
-        # la categorie qui apparait le plus
-        dominent = max(dominent_category, key=dominent_category.get)
-        # return la categorie
-        return dominent
+        category_id = re.sub(r'\s+', '_', category_name)
+        self.categories_collection.add(
+            ids=[category_id],
+            embeddings=[doc_embedding],
+            metadatas=[{"name" : category_name}]
+        )
+
+        return category_name
+
+    def ask_llm_for_new_category_name(self, text):
+
+        prompt = f"""
+            Tu catégorises des documents juridiques liés aux déchets.
+            Donne UNE SEULE catégorie courte (2 à 4 mots, en français) qui résume
+            le sujet juridique de cet extrait. Pas de phrase, pas d'explication.
+
+            Extrait :
+            {text[:1500]}
+
+            Réponds uniquement par le nom de la catégorie.
+        """
+
+        try:
+                
+            model_response = self.client.chat.completions.create(
+                messages=[
+                    {
+                        "role" : "user",
+                        "content" : prompt
+                    }
+                ],
+                model="llama-3.1-8b-instant"
+            )
+
+            return model_response.choices[0].message.content
+
+        except RateLimitError as e:
+            return "Rate"
+        
+        except Exception as e:
+            return str(e)
+
 
     def chunking(self, text, chunk_size=450, overlap=50):
-        # Divise un texte long en petits segments qui se chevauchent pour une meilleure qualité d’embedding
+        # Divise un texte long en petits segments qui se chevauchent pour une meilleure qualité d'embedding
         chunks = []
         start = 0
         while start < len(text):
@@ -218,25 +156,25 @@ class RetrievalPipeline:
             if len(chunk) >= 250:
                 chunks.append(chunk)
 
-            # Déplace la fenêtre vers l’avant, en gardant un chevauchement pour préserver le contexte
+            # Déplace la fenêtre vers l'avant, en gardant un chevauchement pour préserver le contexte
             start += chunk_size - overlap
 
         return chunks
 
     def index_text(self, file_name):
         """
-        Indexe un fichier texte depuis ADLS
+        Indexe un fichier texte local
         
         Args:
             file_name: Nom du fichier dans le dossier clean_data (ex: "document.txt")
         """
-        # Construit le chemin complet dans ADLS
-        adls_file_path = f"{self.clean_data_dir}/{file_name}"
+        # Construit le chemin complet local
+        local_file_path = os.path.join(self.clean_data_dir, file_name)
         
-        # Lit le contenu du fichier texte depuis ADLS
-        text_law = read_text_from_adls(self.file_system, adls_file_path)
+        # Lit le contenu du fichier texte local
+        text_law = read_text_local(local_file_path)
         if text_law is None:
-            print(f"Erreur: Impossible de lire {file_name} depuis ADLS.")
+            print(f"Erreur: Impossible de lire {file_name}.")
             return
 
         # Divise le texte en segments
@@ -267,12 +205,12 @@ class RetrievalPipeline:
             # Crée un identifiant unique pour chaque segment basé sur le nom du fichier et son index
             chunk_id = f"{file_id}_chunk_{i}" 
             # recupere la categorie
-            category = self.find_category(chunk)
-            # Passe ce segment s’il est déjà indexé
+            category = self.find_category(chunk)     
+            # Passe ce segment s'il est déjà indexé
             if chunk_id in existing_ids:
                 continue
             
-            # Génère un embedding pour le segment à l’aide du modèle
+            # Génère un embedding pour le segment à l'aide du modèle
             embedding = self.model.encode(chunk, convert_to_numpy=True)
             # Ajoute le segment, son embedding et ses métadonnées (chemin du fichier) à la collection
             self.collection.add(
@@ -288,21 +226,21 @@ if __name__ == "__main__":
     retrieval_pipeline = RetrievalPipeline()
     
     try:
-        # Parcourt tous les fichiers texte dans le dossier 'clean_data' depuis ADLS et les indexe
-        file_list = list_files_in_adls(retrieval_pipeline.file_system, retrieval_pipeline.clean_data_dir)
+        # Parcourt tous les fichiers texte dans le dossier 'clean_data' local et les indexe
+        file_list = list_files_local(retrieval_pipeline.clean_data_dir)
         
         if not file_list:
-            print(f"Aucun fichier trouvé dans {ACCOUNT_NAME}/{FILESYSTEM}/{retrieval_pipeline.clean_data_dir}/")
-            print("Assurez-vous que les fichiers ont été traités par scrap.py et sont disponibles dans ADLS.")
+            print(f"Aucun fichier trouvé dans {retrieval_pipeline.clean_data_dir}/")
+            print("Assurez-vous que les fichiers ont été traités par scrap.py.")
         else:
-            print(f"Trouvé {len(file_list)} fichier(s) à indexer dans {ACCOUNT_NAME}/{FILESYSTEM}/{retrieval_pipeline.clean_data_dir}/")
+            print(f"Trouvé {len(file_list)} fichier(s) à indexer dans {retrieval_pipeline.clean_data_dir}/")
             for file_name in file_list:
                 print(f"Indexation de: {file_name}")
                 retrieval_pipeline.index_text(file_name)
         
-        # Sauvegarde finale vers ADLS
-        retrieval_pipeline.save_to_adls()
+        # Sauvegarde (no-op, PersistentClient persiste automatiquement)
+        retrieval_pipeline.save()
         
     finally:
-        # Nettoyage du dossier temporaire
+        # Nettoyage (no-op en local)
         retrieval_pipeline.cleanup()

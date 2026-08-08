@@ -1,15 +1,20 @@
 from sentence_transformers import SentenceTransformer
-from db_connexion import RetrievalPipeline
+from .db_connexion import RetrievalPipeline
 
 class QuerySearch:
-    """Handles semantic search queries against ChromaDB"""
+    # Handles semantic search queries against ChromaDB
     
     def __init__(self):
         self.model = SentenceTransformer('all-MiniLM-L6-v2')
         self.collection = RetrievalPipeline().collection
+        self.categories_collection = RetrievalPipeline().categories_collection
+
+    def get_category_names(self):
+        data = self.categories_collection.get()
+        return [meta["name"] for meta in data["metadatas"]]
         
-    def query_search_db(self, query):
-        """Search for relevant documents and return neighboring chunks"""
+    def query_search_db(self, query=""):
+        # Search for relevant documents and return neighboring chunks
         if not query or query.strip() == "":
             return None
         

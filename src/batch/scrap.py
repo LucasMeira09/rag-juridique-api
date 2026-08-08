@@ -6,141 +6,52 @@ import re
 from io import BytesIO
 from pypdf import PdfReader 
 from docx import Document
-
-try:
-    from azure.identity import ClientSecretCredential, DefaultAzureCredential
-    from azure.storage.filedatalake import DataLakeServiceClient
-except ModuleNotFoundError:
-    raise SystemExit(
-        "SDK Azure manquant: installez 'azure-identity' et 'azure-storage-file-datalake'.\n"
-        "Exemples:\n"
-        "  - pip:    python -m pip install azure-identity azure-storage-file-datalake\n"
-        "  - conda:  conda install -c conda-forge azure-identity azure-storage-file-datalake"
-    )
+from pathlib import Path
 
 # Recupere les document des url passe et les transforme en texte netoyer et pret pour le pipeline
 
-# ---------- CONFIGURATION ADLS ----------
-# Variables d'environnement attendues:
-# - AZURE_STORAGE_ACCOUNT: nom du compte (sans suffixe .dfs.core.windows.net)
-# - AZURE_STORAGE_KEY: clé de compte (option 1 d'authentification)
-# - STORAGE_FILESYSTEM: nom du file system (ex: 'data')
-# - Option service principal (si pas de STORAGE_KEY):
-#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
-ACCOUNT_NAME = "juridicai"
-ACCOUNT_KEY = os.getenv("AZURE_STORAGE_KEY", "").strip()
-FILESYSTEM = "data"
+# Local config
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DATA_DIR = os.getenv("DATA_DIR", str(_PROJECT_ROOT / "data"))
 
-RAW_DIR = "raw_pdfs"
-BEFORE_CLEAN_DIR = "before_clean_data"
-CLEAN_DIR = "clean_data"
-# ---------------------------------------
+RAW_DIR = os.path.join(DATA_DIR, "raw_pdfs")
+BEFORE_CLEAN_DIR = os.path.join(DATA_DIR, "before_clean_data")
+CLEAN_DIR = os.path.join(DATA_DIR, "clean_data")
 
-def get_dls_client():
-    """Crée et retourne un client Azure Data Lake Storage"""
-    if not ACCOUNT_NAME or not FILESYSTEM:
-        raise SystemExit("Veuillez définir AZURE_STORAGE_ACCOUNT et STORAGE_FILESYSTEM.")
-    account_url = f"https://{ACCOUNT_NAME}.dfs.core.windows.net"
 
-    if ACCOUNT_KEY:
-        return DataLakeServiceClient(account_url=account_url, credential=ACCOUNT_KEY)
-
-    # Essayer DefaultAzureCredential (Managed Identity / dev env), sinon service principal
+def list_files_local(directory_path):
+    # Liste tous les fichiers dans un répertoire local
     try:
-        credential = DefaultAzureCredential(exclude_interactive_browser_credential=False)
-        return DataLakeServiceClient(account_url=account_url, credential=credential)
-    except Exception:
-        tenant_id = os.getenv("AZURE_TENANT_ID")
-        client_id = os.getenv("AZURE_CLIENT_ID")
-        client_secret = os.getenv("AZURE_CLIENT_SECRET")
-        if not (tenant_id and client_id and client_secret):
-            raise SystemExit(
-                "Aucun mode d'authentification disponible. Fournissez AZURE_STORAGE_KEY "
-                "ou un service principal (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)."
-            )
-        credential = ClientSecretCredential(tenant_id=tenant_id, client_id=client_id, client_secret=client_secret)
-        return DataLakeServiceClient(account_url=account_url, credential=credential)
-
-def list_files_in_adls(file_system_client, directory_path):
-    """Liste tous les fichiers dans un répertoire ADLS"""
-    try:
-        paths_iter = file_system_client.get_paths(path=directory_path)
-        files = []
-        for p in paths_iter:
-            if not p.is_directory and p.name.startswith(directory_path + "/"):
-                files.append(os.path.basename(p.name))
-        return files
+        if not os.path.isdir(directory_path):
+            return []
+        return [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f))]
     except Exception:
         return []
 
-def upload_file_to_adls(file_system_client, file_path, file_data):
-    """Upload un fichier vers ADLS"""
+def read_text_local(file_path):
+    # Lit un fichier texte local et retourne son contenu
     try:
-        file_client = file_system_client.get_file_client(file_path)
-        # Supprimer si existe déjà
-        try:
-            file_client.delete_file()
-        except Exception:
-            pass
-        # Créer et écrire
-        file_client.create_file()
-        file_client.append_data(data=file_data, offset=0, length=len(file_data))
-        file_client.flush_data(len(file_data))
-        return True
-    except Exception as e:
-        print(f"Erreur lors de l'upload: {e}")
-        return False
-
-def download_file_from_adls(file_system_client, file_path):
-    """Télécharge un fichier depuis ADLS et retourne les bytes"""
-    try:
-        file_client = file_system_client.get_file_client(file_path)
-        if hasattr(file_client, "read_file"):
-            downloader = file_client.read_file()
-        else:
-            downloader = file_client.download_file()
-        return downloader.readall()
-    except Exception as e:
-        print(f"Erreur lors du téléchargement: {e}")
-        return None
-
-def read_text_from_adls(file_system_client, file_path):
-    """Lit un fichier texte depuis ADLS et retourne son contenu"""
-    try:
-        file_client = file_system_client.get_file_client(file_path)
-        if hasattr(file_client, "read_file"):
-            downloader = file_client.read_file()
-        else:
-            downloader = file_client.download_file()
-        return downloader.readall().decode("utf-8")
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
     except Exception as e:
         print(f"Erreur lors de la lecture: {e}")
         return None
 
-def write_text_to_adls(file_system_client, file_path, text):
-    """Écrit un texte dans un fichier ADLS"""
+def write_text_local(file_path, text):
+    # Écrit un texte dans un fichier local
     try:
-        file_client = file_system_client.get_file_client(file_path)
-        # Supprimer si existe déjà
-        try:
-            file_client.delete_file()
-        except Exception:
-            pass
-        # Créer et écrire
-        data = text.encode("utf-8")
-        file_client.create_file()
-        file_client.append_data(data=data, offset=0, length=len(data))
-        file_client.flush_data(len(data))
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(text)
         return True
     except Exception as e:
         print(f"Erreur lors de l'écriture: {e}")
         return False
 
-def delete_file_from_adls(file_system_client, file_path):
-    """Supprime un fichier depuis ADLS"""
+def delete_file_local(file_path):
+    # Supprime un fichier local
     try:
-        file_client = file_system_client.get_file_client(file_path)
-        file_client.delete_file()
+        os.remove(file_path)
         return True
     except Exception as e:
         print(f"Erreur lors de la suppression: {e}")
@@ -167,22 +78,14 @@ class TextScrapper():
         self.pdf_urls = []    
         self.new_files_count = 0 # Compteur de nouveaux fichiers
 
-        # Initialiser le client Azure Data Lake Storage
-        self.dls_client = get_dls_client()
-        self.file_system = self.dls_client.get_file_system_client(FILESYSTEM)
-        
-        # Chemins Azure pour les différents dossiers
+        # Chemins locaux pour les différents dossiers
         self.raw_pdf = RAW_DIR
         self.output_folder = BEFORE_CLEAN_DIR
         self.final_folder = CLEAN_DIR
         
-        # Créer les dossiers dans Azure si ils n'existent pas
+        # Créer les dossiers locaux si ils n'existent pas
         for directory in [self.raw_pdf, self.output_folder, self.final_folder]:
-            try:
-                self.file_system.create_directory(directory)
-            except Exception:
-                # Le dossier existe déjà, on continue
-                pass
+            os.makedirs(directory, exist_ok=True)
 
     def get_text(self):
         
@@ -200,7 +103,7 @@ class TextScrapper():
     def download_text(self):
         self.get_text()
 
-        file_list = list_files_in_adls(self.file_system, self.raw_pdf)
+        file_list = list_files_local(self.raw_pdf)
 
         for pdf_url in self.pdf_urls:
             print("Has recovered :", pdf_url)
@@ -230,49 +133,43 @@ class TextScrapper():
                 filename = pdf_url.split("/")[-1]
             
             filename = filename.strip().strip('"').strip("'")
-            filename = re.sub(r'[<>:"/\\|?*]', '_',filename)
-            filepath = f"{self.raw_pdf}/{filename}"
+            filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+            filepath = os.path.join(self.raw_pdf, filename)
 
             try:
                 if filename not in file_list:
-                    # Télécharger le fichier en mémoire
+                    # Télécharger le fichier en mémoire puis sauvegarder localement
                     file_data = b""
                     for chunk in request.iter_content(chunk_size=8192):
                         if chunk:
                             file_data += chunk
                     
-                    # Upload vers Azure
-                    if upload_file_to_adls(self.file_system, filepath, file_data):
-                        print(f"→ Sauvegardé dans {ACCOUNT_NAME}/{FILESYSTEM}/{filepath}")
-                    else:
-                        print(f"Erreur lors de la sauvegarde de {filename}")
+                    # Sauvegarder sur disque local
+                    with open(filepath, "wb") as f:
+                        f.write(file_data)
+                    print(f"→ Sauvegardé dans {filepath}")
                 else:
                     print(f"Text: {filename}, already here.")
             except Exception as e:
                 print("can't save:", e)
 
     def pdf_to_txt(self):
-        """
-        Convertit tous les PDFs d'un dossier en fichiers TXT dans Azure
         
-        Args:
-            pdf_folder: Dossier contenant les PDFs à convertir (Azure)
-            output_folder: Dossier de destination pour les fichiers TXT (Azure)
-        """
+        # Convertit tous les PDFs d'un dossier en fichiers TXT localement
         
-        # Récupérer tous les fichiers PDF depuis Azure
-        pdf_files = list_files_in_adls(self.file_system, self.raw_pdf)
+        # Récupérer tous les fichiers PDF depuis le dossier local
+        pdf_files = list_files_local(self.raw_pdf)
         
         if not pdf_files:
-            print(f"  Aucun fichier PDF trouvé dans le dossier '{ACCOUNT_NAME}/{FILESYSTEM}/{self.raw_pdf}/'")
-            print(f" Placez vos fichiers PDF dans le dossier '{ACCOUNT_NAME}/{FILESYSTEM}/{self.raw_pdf}/' et relancez le script.")
+            print(f"  Aucun fichier PDF trouvé dans le dossier '{self.raw_pdf}/'")
+            print(f" Placez vos fichiers PDF dans le dossier '{self.raw_pdf}/' et relancez le script.")
             return
         
         print(f"\n{'='*80}")
-        print(f"   CONVERSION PDF → TXT (Azure) ".center(80))
+        print(f"   CONVERSION PDF → TXT (Local) ".center(80))
         print(f"{'='*80}\n")
-        print(f" Dossier source : {ACCOUNT_NAME}/{FILESYSTEM}/{self.raw_pdf}/")
-        print(f" Dossier destination : {ACCOUNT_NAME}/{FILESYSTEM}/{self.output_folder}/")
+        print(f" Dossier source : {self.raw_pdf}/")
+        print(f" Dossier destination : {self.output_folder}/")
         print(f" Nombre de PDFs trouvés : {len(pdf_files)}\n")
         print(f"{'='*80}\n")
         
@@ -280,23 +177,20 @@ class TextScrapper():
         error_count = 0
         
         # liste avec tout les nom des fichier texte de before_clean_data
-        text_list = list_files_in_adls(self.file_system, self.output_folder)
+        text_list = list_files_local(self.output_folder)
 
         # Convertir chaque PDF
         for i, pdf_name in enumerate(pdf_files, 1):
-            pdf_adls_path = f"{self.raw_pdf}/{pdf_name}"
+            pdf_local_path = os.path.join(self.raw_pdf, pdf_name)
             root, extension = os.path.splitext(pdf_name)
             
             try:
-                # Télécharger le fichier depuis Azure
-                pdf_bytes = download_file_from_adls(self.file_system, pdf_adls_path)
-                if pdf_bytes is None:
-                    print(f"[{i}/{len(pdf_files)}]  Erreur lors du téléchargement : {pdf_name}\n")
-                    error_count += 1
-                    continue
+                # Lire le fichier depuis le disque local
+                with open(pdf_local_path, "rb") as f:
+                    pdf_bytes = f.read()
                 
                 txt_name = pdf_name.replace(extension, '.txt')
-                output_path = f"{self.output_folder}/{txt_name}"
+                output_path = os.path.join(self.output_folder, txt_name)
                 
                 if txt_name not in text_list:
                     print(f"[{i}/{len(pdf_files)}]  Conversion de : {pdf_name}")
@@ -326,8 +220,8 @@ class TextScrapper():
                             error_count += 1
                             continue
                     
-                    # Écrire le texte dans Azure
-                    if write_text_to_adls(self.file_system, output_path, text):
+                    # Écrire le texte localement
+                    if write_text_local(output_path, text):
                         chars_count = len(text)
                         print(f"    Converti avec succès : {txt_name}")
                         print(f"    Pages : {pages_count} | Caractères : {chars_count:,}\n")
@@ -350,18 +244,18 @@ class TextScrapper():
         print(f"{'='*80}\n")
         print(f" Conversions réussies : {success_count}")
         print(f" Conversions échouées : {error_count}")
-        print(f" Fichiers TXT disponibles dans : {ACCOUNT_NAME}/{FILESYSTEM}/{self.output_folder}/\n")
+        print(f" Fichiers TXT disponibles dans : {self.output_folder}/\n")
         print(f"{'='*80}\n")
 
 
     def clean_text(self):
-        text_path = list_files_in_adls(self.file_system, self.output_folder)
+        text_path = list_files_local(self.output_folder)
 
         for text_name in text_path:
-            text_directory = f"{self.output_folder}/{text_name}"
+            text_directory = os.path.join(self.output_folder, text_name)
 
-            # Lire le texte depuis Azure
-            text = read_text_from_adls(self.file_system, text_directory)
+            # Lire le texte depuis le disque local
+            text = read_text_local(text_directory)
             if text is None:
                 print(f"Erreur lors de la lecture de {text_name}, ignoré.")
                 continue
@@ -387,22 +281,22 @@ class TextScrapper():
             #
             text_to_clean = text_to_clean.strip()
 
-            clean_text_directory = f"{self.final_folder}/{text_name}"
+            clean_text_directory = os.path.join(self.final_folder, text_name)
 
-            # Écrire le texte nettoyé dans Azure
-            if not write_text_to_adls(self.file_system, clean_text_directory, text_to_clean):
+            # Écrire le texte nettoyé localement
+            if not write_text_local(clean_text_directory, text_to_clean):
                 print(f"Erreur lors de l'écriture de {text_name}")
 
     def clone_verifie(self):
         # verifie les si il y a des texte en double et les supprime
 
-        text_list = list_files_in_adls(self.file_system, self.final_folder)
+        text_list = list_files_local(self.final_folder)
 
         # recupere tout les texte
         for i, text_file in enumerate(text_list):
             try:
-                text_directory = f"{self.final_folder}/{text_file}"
-                text = read_text_from_adls(self.file_system, text_directory)
+                text_directory = os.path.join(self.final_folder, text_file)
+                text = read_text_local(text_directory)
                 if text is None:
                     continue
             except:
@@ -411,16 +305,16 @@ class TextScrapper():
             counter = 0
             for n in text_list:
                 try:
-                    text_directory_b = f"{self.final_folder}/{n}"
-                    text_b = read_text_from_adls(self.file_system, text_directory_b)
+                    text_directory_b = os.path.join(self.final_folder, n)
+                    text_b = read_text_local(text_directory_b)
                     if text_b is None:
                         continue
 
                     if text == text_b and counter == 0:
                         counter += 1
                     elif text == text_b and counter > 0:
-                        if delete_file_from_adls(self.file_system, text_directory_b):
-                            print(f"File {ACCOUNT_NAME}/{FILESYSTEM}/{text_directory_b} removed")
+                        if delete_file_local(text_directory_b):
+                            print(f"File {text_directory_b} removed")
                 except:
                     pass
 

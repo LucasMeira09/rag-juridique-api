@@ -5,15 +5,14 @@ import requests
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-from scrap import TextScrapper
-from traitement import RetrievalPipeline, list_files_in_adls, ACCOUNT_NAME, FILESYSTEM
+from .scrap import TextScrapper
+from .traitement import RetrievalPipeline, list_files_local
 
 def restart_api():
     """Trigger API restart via webhook to reload data"""
     try:
         print("\n[PIPELINE] Triggering API restart...")
-        # Replace with your actual API URL
-        api_url = "https://juridicai-api.ashyplant-4eb87a1a.westeurope.azurecontainerapps.io"
+        api_url = os.getenv("API_URL", "http://localhost:8000")
         requests.post(f"{api_url}/admin/restart", timeout=5)
         print("[PIPELINE] Restart signal sent!")
     except Exception as e:
@@ -56,7 +55,7 @@ def run_pipeline():
         try:
             retrieval_pipeline = RetrievalPipeline()
             
-            file_list = list_files_in_adls(retrieval_pipeline.file_system, retrieval_pipeline.clean_data_dir)
+            file_list = list_files_local(retrieval_pipeline.clean_data_dir)
             
             if not file_list:
                 print("Warning: No files found in clean_data despite detecting new files.")
@@ -65,7 +64,7 @@ def run_pipeline():
                 for file_name in file_list:
                     retrieval_pipeline.index_text(file_name)
             
-            retrieval_pipeline.save_to_adls()
+            retrieval_pipeline.save()
             retrieval_pipeline.cleanup()
             
             # Trigger API restart after successful update

@@ -1,15 +1,27 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from reponse import Generation
+from .reponse import Generation
 from datetime import date
+import time
+import os
+
+# uvicorn src.server.bridge:app --reload
 
 app = FastAPI()
 
+cors_origins_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001")
+if cors_origins_raw == "*":
+    allow_origins = ["*"]
+    allow_credentials = False
+else:
+    allow_origins = cors_origins_raw.split(",")
+    allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
+    allow_origins=allow_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -22,8 +34,30 @@ class Query(BaseModel):
 @app.post("/search")
 def search(data: Query):
     # Search endpoint that returns AI-generated answers based on document retrieval
-    print("Requete recue : ", data.query)
     model_response, results = model.prompt_augmentation(data.query)
+
+    if model_response == "rate" or model_response == "error":
+        distance = results["distances"][0]
+        relevance = max(0, (2 - distance[0]) / 2 * 100)
+        
+        metadatas = results["metadatas"][0]
+        metadatas_topics = metadatas[0]
+        
+        payload = {
+                "results": [
+                    {
+                        "id": 1,
+                        "title": f"Résultat pour '{data.query}'",
+                        "excerpt": "Please wait a few minutes before your next question. Thanks for your patience",
+                        "source": metadatas_topics['source'],
+                        "date": date.today().isoformat(),
+                        "type": "Réponse IA",
+                        "relevance": round(relevance),
+                        "link": "#"  
+                    }
+                ]
+            }
+        return
     
     distance = results["distances"][0]
     relevance = max(0, (2 - distance[0]) / 2 * 100)
@@ -46,13 +80,11 @@ def search(data: Query):
         ]
     }
     
-    print("Réponse envoyée au front :", payload)
-    
     return payload
 
 @app.post("/admin/restart")
 def trigger_restart():
-    """Admin endpoint to restart the API container (called by pipeline after updates)"""
+    # Admin endpoint to restart the API container (called by pipeline after updates)
     import os
     import signal
     print("[ADMIN] Restart requested - shutting down to reload data...")

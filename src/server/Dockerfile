@@ -29,11 +29,11 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy only the server code
-COPY src/server/ ./src/server/
+# Copy the application code
+COPY src/ ./src/
 
 # Set Python path
-ENV PYTHONPATH=/app/src/server
+ENV PYTHONPATH=/app/src/server:/app
 
 # Expose port
 EXPOSE 8000
