@@ -52,15 +52,8 @@ class Generation:
             return "AUCUNE"
               
     def prompt_augmentation(self, query):
-        # Generate an answer based on retrieved documents
-        query_subject = self.question_subject(query)
-        if query_subject == "Rate":
-            time.sleep(60)
-            query_subject = self.question_subject(query)
-
-        search_res = self.pipeline.query_search_db(query_subject if query_subject and query_subject != "AUCUNE" else query)
-        if not search_res or not search_res[0]:
-            search_res = self.pipeline.query_search_db(query)
+        # Generate an answer based on retrieved documents directly using vector search
+        search_res = self.pipeline.query_search_db(query)
 
         if not search_res or not search_res[0]:
             return "Aucune information pertinente trouvée dans la base de données.", None
