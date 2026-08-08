@@ -29,6 +29,9 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy the application code
 COPY src/ ./src/
 
+# Copy the ChromaDB data
+COPY data/ ./data/
+
 # Set Python path
 ENV PYTHONPATH=/app
 
