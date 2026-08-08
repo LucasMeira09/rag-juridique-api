@@ -33,10 +33,10 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY src/ ./src/
 
 # Set Python path
-ENV PYTHONPATH=/app/src/server:/app
+ENV PYTHONPATH=/app
 
 # Expose port
 EXPOSE 8000
 
 # Run the FastAPI server
-CMD ["uvicorn", "bridge:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.server.bridge:app", "--host", "0.0.0.0", "--port", "8000"]
