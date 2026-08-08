@@ -15,23 +15,27 @@ class QuerySearch:
         
     def query_search_db(self, query=""):
         # Search for relevant documents and return neighboring chunks
-        if not query or query.strip() == "":
-            return None
+        if not query or not str(query).strip():
+            return [], None
+        
+        count = self.collection.count()
+        if count == 0:
+            return [], None
         
         # fastembed returns a generator, convert it to a list and get the first embedding
-        query_embedding = list(self.model.embed([query]))[0]
-        n_result = 3
+        query_embedding = list(self.model.embed([str(query)]))[0]
+        n_result = min(3, count)
         result = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=n_result
         )
         
         final_result = []
-        metadatas_dic = result["metadatas"][0]
+        metadatas_dic = result["metadatas"][0] if result and result.get("metadatas") else []
         
-        for i in range(n_result):
+        for i in range(min(n_result, len(metadatas_dic))):
             metadata = metadatas_dic[i]
-            idx = metadata["chunk_id"]
+            idx = metadata.get("chunk_id", 0)
             
             neighbors = self.collection.get(
                 where={
@@ -40,8 +44,9 @@ class QuerySearch:
             )
             
             doc_str = ""
-            for doc in neighbors["documents"]:
-                doc_str += str(doc)
+            if neighbors and neighbors.get("documents"):
+                for doc in neighbors["documents"]:
+                    doc_str += str(doc)
             final_result.append(doc_str)
             
         return final_result, result

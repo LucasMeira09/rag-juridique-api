@@ -37,54 +37,68 @@ class Query(BaseModel):
 
 @app.post("/search")
 def search(data: Query):
-    # Search endpoint that returns AI-generated answers based on document retrieval
-    model_response, results = model.prompt_augmentation(data.query)
+    try:
+        model_response, results = model.prompt_augmentation(data.query)
 
-    if model_response == "rate" or model_response == "error":
-        distance = results["distances"][0]
-        relevance = max(0, (2 - distance[0]) / 2 * 100)
-        
-        metadatas = results["metadatas"][0]
-        metadatas_topics = metadatas[0]
-        
-        payload = {
+        if not results or not isinstance(results, dict) or not results.get("distances") or not results["distances"][0]:
+            return {
                 "results": [
                     {
                         "id": 1,
                         "title": f"Résultat pour '{data.query}'",
-                        "excerpt": "Please wait a few minutes before your next question. Thanks for your patience",
-                        "source": metadatas_topics['source'],
+                        "excerpt": model_response if isinstance(model_response, str) else "Aucun résultat trouvé dans la base de données.",
+                        "source": "Base de données",
                         "date": date.today().isoformat(),
                         "type": "Réponse IA",
-                        "relevance": round(relevance),
-                        "link": "#"  
+                        "relevance": 50,
+                        "link": "#"
                     }
                 ]
             }
-        return
-    
-    distance = results["distances"][0]
-    relevance = max(0, (2 - distance[0]) / 2 * 100)
-    
-    metadatas = results["metadatas"][0]
-    metadatas_topics = metadatas[0]
-    
-    payload = {
-        "results": [
-            {
-                "id": 1,
-                "title": f"Résultat pour '{data.query}'",
-                "excerpt": model_response,
-                "source": metadatas_topics['source'],
-                "date": date.today().isoformat(),
-                "type": "Réponse IA",
-                "relevance": round(relevance),
-                "link": "#"  
-            }
-        ]
-    }
-    
-    return payload
+
+        distance = results["distances"][0][0]
+        relevance = max(0, (2 - distance) / 2 * 100)
+        
+        metadatas = results.get("metadatas", [[]])[0]
+        source = metadatas[0].get('source', 'Base de données') if metadatas and len(metadatas) > 0 else 'Base de données'
+        
+        if model_response == "rate":
+            excerpt = "Le quota de requêtes Groq est temporairement atteint. Veuillez réessayer dans une minute."
+        elif model_response == "error":
+            excerpt = "Une erreur est survenue lors de l'appel à l'API LLM."
+        else:
+            excerpt = model_response
+
+        return {
+            "results": [
+                {
+                    "id": 1,
+                    "title": f"Résultat pour '{data.query}'",
+                    "excerpt": excerpt,
+                    "source": source,
+                    "date": date.today().isoformat(),
+                    "type": "Réponse IA",
+                    "relevance": round(relevance),
+                    "link": "#"  
+                }
+            ]
+        }
+    except Exception as e:
+        print(f"[API SEARCH ERROR]: {e}")
+        return {
+            "results": [
+                {
+                    "id": 1,
+                    "title": f"Résultat pour '{data.query}'",
+                    "excerpt": f"Erreur lors du traitement de la requête : {str(e)}",
+                    "source": "Système",
+                    "date": date.today().isoformat(),
+                    "type": "Erreur",
+                    "relevance": 0,
+                    "link": "#"
+                }
+            ]
+        }
 
 @app.post("/admin/restart")
 def trigger_restart():

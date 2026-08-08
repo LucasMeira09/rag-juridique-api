@@ -10,17 +10,18 @@ class Generation:
     # Handles LLM response generation using Groq free api
     
     def __init__(self):
-        groq_key = os.getenv("GROQ_KEY")
-        self.client = Groq(api_key=groq_key)
+        groq_key = os.getenv("GROQ_KEY", "")
+        self.client = Groq(api_key=groq_key) if groq_key else None
         self.pipeline = QuerySearch()
 
     def question_subject(self, query):
+        if not self.client:
+            return "AUCUNE"
 
         category_names = self.pipeline.get_category_names()
 
         if not category_names:
             category_names = ["aucune"]
-
 
         name_list = ", ".join(category_names)
         
@@ -33,43 +34,42 @@ class Generation:
                 Réponds UNIQUEMENT avec le nom exact d'une catégorie de la liste, copié tel quel.
                 Si aucune catégorie ne correspond clairement, réponds uniquement : AUCUNE
             """
-
             
         try:
-
             model_response = self.client.chat.completions.create(
                 messages=[
-                    {
-                        "role" : "system",
-                        "content" : prompt
-                    },
-                    {
-                        "role" : "user",
-                        "content" : query
-                    }
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": query}
                 ],
                 model="llama-3.1-8b-instant"
             )
 
             return model_response.choices[0].message.content
-
-        except RateLimitError as e:
+        except RateLimitError:
             return "Rate"
-        
         except Exception as e:
-            return str(e)
+            print(f"[REPONSE ERROR] question_subject: {e}")
+            return "AUCUNE"
               
-        
     def prompt_augmentation(self, query):
         # Generate an answer based on retrieved documents
-
-        # appele la fonction pour filtrer le sujet de la question
         query_subject = self.question_subject(query)
         if query_subject == "Rate":
             time.sleep(60)
             query_subject = self.question_subject(query)
 
-        response, results = self.pipeline.query_search_db(query_subject)
+        search_res = self.pipeline.query_search_db(query_subject if query_subject and query_subject != "AUCUNE" else query)
+        if not search_res or not search_res[0]:
+            search_res = self.pipeline.query_search_db(query)
+
+        if not search_res or not search_res[0]:
+            return "Aucune information pertinente trouvée dans la base de données.", None
+
+        response, results = search_res
+        context_text = "\n\n---\n\n".join(response)
+
+        if not self.client:
+            return "Erreur: Clé GROQ_KEY absente dans la configuration du serveur.", results
 
         prompt = f"""
                 Tu es un assistant qui répond uniquement à partir des documents suivants.
@@ -86,9 +86,7 @@ class Generation:
 
                 Ta tâche :
                 - Lis attentivement les documents suivants :
-                {response[0]}
-                {response[1]}
-                {response[2]}
+                {context_text}
 
                 - Puis, réponds strictement à la question ci-dessous.
                 - Si la réponse n'est pas clairement présente ou déductible des documents, réponds uniquement :
@@ -98,25 +96,18 @@ class Generation:
         """
         
         try:
-        
             model_response = self.client.chat.completions.create(
                 messages=[
-                    {
-                        "role" : "system",
-                        "content" : prompt
-                    },
-                    {
-                        "role" : "user",
-                        "content" : query
-                    }
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": query}
                 ],
                 model="llama-3.1-8b-instant"
             )
 
             return model_response.choices[0].message.content, results
 
-        except RateLimitError as e:
+        except RateLimitError:
             return "rate", results
-        
         except Exception as e:
-            return "error", e
+            print(f"[LLM ERROR]: {e}")
+            return "error", results
