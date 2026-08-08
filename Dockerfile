@@ -30,7 +30,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY src/ ./src/
 
 # Copy the ChromaDB data
-COPY data/ ./data/
+COPY data/chroma_db/ ./data/chroma_db/
 
 # Set Python path
 ENV PYTHONPATH=/app
