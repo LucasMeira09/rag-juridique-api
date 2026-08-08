@@ -10,12 +10,12 @@ import os
 
 app = FastAPI()
 
-cors_origins_raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001")
-if cors_origins_raw == "*":
+cors_origins_raw = os.getenv("CORS_ORIGINS", "*")
+if cors_origins_raw.strip() == "*":
     allow_origins = ["*"]
     allow_credentials = False
 else:
-    allow_origins = cors_origins_raw.split(",")
+    allow_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
     allow_credentials = True
 
 app.add_middleware(
