@@ -1,5 +1,5 @@
 import chromadb 
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 import os
 from pathlib import Path
 import json
@@ -40,8 +40,8 @@ def read_text_local(file_path):
 
 class RetrievalPipeline:
     def __init__(self):
-        # Initialise le modèle SentenceTransformer pour les embeddings de texte
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        # Initialise le modèle fastembed pour les embeddings de texte
+        self.model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
         groq_key = os.getenv("GROQ_KEY")
         self.client = Groq(api_key=groq_key)
@@ -78,7 +78,7 @@ class RetrievalPipeline:
         
         similarity_threshold = 0.45
 
-        doc_embedding = self.model.encode(text[:3000], convert_to_numpy=True)
+        doc_embedding = list(self.model.embed([text[:3000]]))[0]
 
         existing_count = self.categories_collection.count()
         if existing_count > 0:
@@ -211,7 +211,7 @@ class RetrievalPipeline:
                 continue
             
             # Génère un embedding pour le segment à l'aide du modèle
-            embedding = self.model.encode(chunk, convert_to_numpy=True)
+            embedding = list(self.model.embed([chunk]))[0]
             # Ajoute le segment, son embedding et ses métadonnées (chemin du fichier) à la collection
             self.collection.add(
                 ids=[chunk_id],

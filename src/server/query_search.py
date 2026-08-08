@@ -1,11 +1,11 @@
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from .db_connexion import RetrievalPipeline
 
 class QuerySearch:
     # Handles semantic search queries against ChromaDB
     
     def __init__(self):
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
         self.collection = RetrievalPipeline().collection
         self.categories_collection = RetrievalPipeline().categories_collection
 
@@ -18,7 +18,8 @@ class QuerySearch:
         if not query or query.strip() == "":
             return None
         
-        query_embedding = self.model.encode(query)
+        # fastembed returns a generator, convert it to a list and get the first embedding
+        query_embedding = list(self.model.embed([query]))[0]
         n_result = 3
         result = self.collection.query(
             query_embeddings=[query_embedding],
