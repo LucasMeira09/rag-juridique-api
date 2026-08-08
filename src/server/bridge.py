@@ -28,6 +28,10 @@ app.add_middleware(
 
 model = Generation()
 
+@app.get("/")
+def read_root():
+    return {"status": "healthy", "message": "Legal RAG API is running"}
+
 class Query(BaseModel):
     query: str
 
