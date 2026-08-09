@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the FastEmbed model into build cache
 ENV FASTEMBED_CACHE_PATH=/build/fastembed_cache
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', threads=1, providers=['CPUExecutionProvider'])"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2', threads=1, providers=['CPUExecutionProvider'])"
 
 # Stage 2: Runtime (much smaller)
 FROM python:3.11-slim
