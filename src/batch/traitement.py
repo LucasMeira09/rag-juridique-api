@@ -41,7 +41,7 @@ def read_text_local(file_path):
 class RetrievalPipeline:
     def __init__(self):
         # Initialise le modèle fastembed pour les embeddings de texte
-        self.model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        self.model = TextEmbedding(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
         groq_key = os.getenv("GROQ_KEY")
         self.client = Groq(api_key=groq_key)
@@ -62,8 +62,14 @@ class RetrievalPipeline:
         # Crée ou connecte une base de données Chroma persistante au chemin local
         self.chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
         # Récupère ou crée une collection dans la base appelée "law_text"
-        self.collection = self.chroma_client.get_or_create_collection(name="law_text")
-        self.categories_collection = self.chroma_client.get_or_create_collection(name="categories")
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="law_text",
+            metadata={"hnsw:space": "cosine"}
+        )
+        self.categories_collection = self.chroma_client.get_or_create_collection(
+            name="categories",
+            metadata={"hnsw:space": "cosine"}
+        )
 
     def save(self):
         # No-op — PersistentClient sauvegarde automatiquement sur disque.

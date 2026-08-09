@@ -15,8 +15,14 @@ class RetrievalPipeline:
         
         print(f"[SERVER] Initialisation: Chargement de ChromaDB depuis {db_path}")
         self.chroma_client = chromadb.PersistentClient(path=db_path)
-        self.collection = self.chroma_client.get_or_create_collection(name="law_text")
-        self.categories_collection = self.chroma_client.get_or_create_collection(name="categories")
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="law_text",
+            metadata={"hnsw:space": "cosine"}
+        )
+        self.categories_collection = self.chroma_client.get_or_create_collection(
+            name="categories",
+            metadata={"hnsw:space": "cosine"}
+        )
         print(f"[SERVER] Collection chargée avec {self.collection.count()} documents")
 
     def cleanup(self):
