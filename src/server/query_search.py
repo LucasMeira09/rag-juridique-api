@@ -33,7 +33,11 @@ class QuerySearch:
     # Handles semantic search queries against ChromaDB
     
     def __init__(self):
-        self.model = TextEmbedding(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        self.model = TextEmbedding(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            threads=1,
+            providers=["CPUExecutionProvider"]
+        )
         self.collection = RetrievalPipeline().collection
         self.categories_collection = RetrievalPipeline().categories_collection
 

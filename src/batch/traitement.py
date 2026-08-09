@@ -41,7 +41,11 @@ def read_text_local(file_path):
 class RetrievalPipeline:
     def __init__(self):
         # Initialise le modèle fastembed pour les embeddings de texte
-        self.model = TextEmbedding(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        self.model = TextEmbedding(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            threads=1,
+            providers=["CPUExecutionProvider"]
+        )
 
         groq_key = os.getenv("GROQ_KEY")
         self.client = Groq(api_key=groq_key)
