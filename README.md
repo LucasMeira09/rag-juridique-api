@@ -1,5 +1,6 @@
 # Semantic Search System for Legal Texts
 This project implements a semantic search pipeline (RAG) using ChromaDB and SentenceTransformers to index and query legal documents.
+Site is accessible at --> https://legal-rag-showcase.onrender.com
 > **New here?** Check out the [Quick Start Guide](docs/QUICKSTART.md)
 ## Features
 - **PDF -> TXT Conversion**: Automatically extracts text from your PDFs
